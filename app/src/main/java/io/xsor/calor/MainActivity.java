@@ -4,17 +4,20 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.util.Set;
 import java.util.UUID;
 
 
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
@@ -34,13 +37,11 @@ public class MainActivity extends AppCompatActivity {
     private BluetoothSocket btSocket = null;
     private StringBuilder sb = new StringBuilder();
 
-    private ConnectedThread mConnectedThread;
-
     // Intent request codes
     private static final int REQUEST_CONNECT_DEVICE_SECURE = 1;
     private static final int REQUEST_ENABLE_BT = 3;
 
-    String address = "30:14:11:27:10:72";
+    String address;// = "30:14:11:27:10:72";
 
     // SPP UUID service
     private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
@@ -82,6 +83,15 @@ public class MainActivity extends AppCompatActivity {
         btAdapter = BluetoothAdapter.getDefaultAdapter();       // get Bluetooth adapter
         checkBTState();
 
+        // Set up a pointer to the remote node using it's address.
+        Set<BluetoothDevice> devices = btAdapter.getBondedDevices();
+        for(BluetoothDevice d : devices) {
+            if(d.getName().equals("HC-06")) {
+                address = d.getAddress();
+                Log.i(TAG,"Address: " + address);
+            }
+        }
+
     }
 
     private BluetoothSocket createBluetoothSocket(BluetoothDevice device) throws IOException {
@@ -102,10 +112,9 @@ public class MainActivity extends AppCompatActivity {
 
         Log.d(TAG, "...onResume - try connect...");
 
-        // Set up a pointer to the remote node using it's address.
-
         BluetoothDevice device = btAdapter.getRemoteDevice(address);
 
+        final String deviceName = device.getName();
         // Two things are needed to make a connection:
         //   A MAC address, which we got above.
         //   A Service ID or UUID.  In this case we are using the
@@ -121,37 +130,37 @@ public class MainActivity extends AppCompatActivity {
         // when you attempt to connect and pass your message.
         btAdapter.cancelDiscovery();
 
-        // Establish the connection.  This will block until it connects.
-        Log.d(TAG, "...Connecting...");
-        try {
-            btSocket.connect();
-            Log.d(TAG, "....Connection ok...");
-        } catch (IOException e) {
-            try {
-                btSocket.close();
-            } catch (IOException e2) {
-                errorExit("Fatal Error", "In onResume() and unable to close socket during connection failure" + e2.getMessage() + ".");
+        Thread thread = new Thread() {
+            @Override
+            public void run() {
+                // Establish the connection.  This will block until it connects.
+                Looper.prepare();
+                toast("Connecting to " + deviceName);
+                Log.d(TAG, "...Connecting...");
+                try {
+                    btSocket.connect();
+                    Log.d(TAG, "....Connection ok...");
+                    toast("Connected to " + deviceName);
+                } catch (IOException e) {
+                    try {
+                        btSocket.close();
+                    } catch (IOException e2) {
+                        errorExit("Fatal Error", "In onResume() and unable to close socket during connection failure" + e2.getMessage() + ".");
+                    }
+                }
+                Looper.loop();
             }
-        }
+        };
+        thread.start();
+
+
 
         // Create a data stream so we can talk to server.
         Log.d(TAG, "...Create Socket...");
 
-        mConnectedThread = new ConnectedThread(btSocket);
+        ConnectedThread mConnectedThread = new ConnectedThread(btSocket);
         mConnectedThread.start();
-    }
 
-    @Override
-    public void onPause() {
-        super.onPause();
-
-        Log.d(TAG, "...In onPause()...");
-
-        try     {
-            btSocket.close();
-        } catch (IOException e2) {
-            errorExit("Fatal Error", "In onPause() and failed to close socket." + e2.getMessage() + ".");
-        }
     }
 
     @Override
@@ -159,6 +168,10 @@ public class MainActivity extends AppCompatActivity {
         // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.menu_main, menu);
         return true;
+    }
+
+    private void toast(String text) {
+        Toast.makeText(this,text,Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -197,24 +210,18 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
         switch (requestCode) {
             case REQUEST_CONNECT_DEVICE_SECURE:
                 // When DeviceListActivity returns with a device to connect
                 if (resultCode == Activity.RESULT_OK) {
-                    connectDevice(data);
+                    address = data.getExtras().getString(DeviceListActivity.EXTRA_DEVICE_ADDRESS);
+                    Log.i(TAG, "Device Address from Activity: " + address);
                 }
                 break;
         }
-    }
-
-    private void connectDevice(Intent data) {
-        // Get the device MAC address
-        address = data.getExtras().getString(DeviceListActivity.EXTRA_DEVICE_ADDRESS);
-        Log.i(TAG, "Device Address: " + address);
-        mConnectedThread.start();
-        //connectToDevice(address);
-        // Get the BluetoothDevice object
     }
 
     private void errorExit(String title, String message){
